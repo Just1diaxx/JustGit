@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JustGit</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f4f4f9;
+      color: #333;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+
+    h1 {
+      color: #2c3e50;
+    }
+
+    #container {
+      width: 80%;
+      max-width: 1200px;
+      background-color: #fff;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+    }
+
+    #controls {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
+    #controls input {
+      padding: 10px;
+      width: 300px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      font-size: 16px;
+    }
+
+    #controls button {
+      padding: 10px 15px;
+      background-color: #3498db;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+
+    #controls button:hover {
+      background-color: #2980b9;
+    }
+
+    #repoList,
+    #fileList {
+      margin-top: 20px;
+    }
+
+    #repoList ul,
+    #fileList ul {
+      list-style-type: none;
+      padding: 0;
+    }
+
+    #repoList ul li,
+    #fileList ul li {
+      padding: 10px;
+      background-color: #ecf0f1;
+      margin-bottom: 10px;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+
+    #repoList ul li:hover,
+    #fileList ul li:hover {
+      background-color: #bdc3c7;
+    }
+
+    .folder {
+      color: #2980b9;
+    }
+
+    .file {
+      color: #2c3e50;
+    }
+
+    #cloneRepoBtn,
+    #backBtn {
+      margin-top: 20px;
+      padding: 10px 20px;
+      background-color: #e74c3c;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    #cloneRepoBtn:hover,
+    #backBtn:hover {
+      background-color: #c0392b;
+    }
+
+    #backBtn {
+      display: none;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>JustGit</h1>
+  <div id="container">
+    <div id="controls">
+      <input type="text" id="username" placeholder="Enter GitHub username">
+      <button id="fetchReposBtn">Fetch Repositories</button>
+    </div>
+
+    <div id="repoList"></div>
+    <div id="fileList"></div>
+
+    <button id="backBtn">← Back</button>
+    <button id="cloneRepoBtn">Clone Repository</button>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+    const axios = require('axios');
+    const simpleGit = require('simple-git');
+    const path = require('path');
+    const os = require("os");
+
+    let currentPath = '';
+    let repoFullName = '';
+
+    document.getElementById('fetchReposBtn').addEventListener('click', async () => {
+      const username = document.getElementById('username').value;
+      if (!username) {
+        alert('Please enter a GitHub username.');
+        return;
+      }
+      displayRepoContents();
+      const repos = await ipcRenderer.invoke('fetch-repos', username);
+      displayRepos(repos);
+    });
+
+    function displayRepos(repos) {
+      const repoListDiv = document.getElementById('repoList');
+      repoListDiv.innerHTML = '<h2>Repositories</h2>';
+      const ul = document.createElement('ul');
+
+      repos.forEach(repo => {
+        const li = document.createElement('li');
+        const repoLink = document.createElement('span');
+        repoLink.textContent = repo.name;
+        repoLink.className = 'folder';
+        repoLink.onclick = () => fetchRepoContents(repo.full_name, '');
+        li.appendChild(repoLink);
+        ul.appendChild(li);
+      });
+
+      repoListDiv.appendChild(ul);
+    }
+
+    async function fetchRepoContents(fullName, path) {
+      currentPath = path;
+      repoFullName = fullName;
+      const contents = await ipcRenderer.invoke('fetch-repo-contents', fullName, path);
+      displayRepoContents(contents);
+    }
+
+    function displayRepoContents(contents) {
+      if (!contents) {
+        return;
+      }
+      const fileListDiv = document.getElementById('fileList');
+      fileListDiv.innerHTML = '<h2>Files</h2>';
+      const ul = document.createElement('ul');
+
+
+
+      contents.forEach(item => {
+        const li = document.createElement('li');
+        const itemLink = document.createElement('span');
+
+        const emoji = item.type === 'dir' ? '📁' : '📄';
+        itemLink.textContent = `${item.name} ${emoji}`;
+        itemLink.className = item.type === 'dir' ? 'folder' : 'file';
+
+        itemLink.onclick = () => {
+          if (item.type === 'dir') {
+            fetchRepoContents(repoFullName, item.path);
+          } else {
+            viewFileContent(item.path);
+          }
+        };
+
+        li.appendChild(itemLink);
+        ul.appendChild(li);
+      });
+
+      fileListDiv.appendChild(ul);
+
+
+      document.getElementById('backBtn').style.display = currentPath ? 'block' : 'none';
+
+
+      document.getElementById('cloneRepoBtn').style.display = 'block';
+    }
+
+    async function viewFileContent(filePath) {
+      const content = await ipcRenderer.invoke('view-file-content', repoFullName, filePath);
+      alert(content);
+    }
+
+    async function cloneRepo(repoFullName) {
+      try {
+        const git = simpleGit();
+        const repoName = repoFullName.split('/')[1];
+        const homedir = os.homedir();
+        const targetPath = path.join(homedir, 'Documents', 'JustGit', 'cloned-repos', repoName);
+
+        await git.clone(`https://github.com/${repoFullName}.git`, targetPath);
+        console.log(`Repository cloned at: ${targetPath}`);
+        alert(`Repository cloned at: ${targetPath}`);
+        return 'Repository cloned successfully!';
+      } catch (error) {
+        console.error(`Errore while cloning repository ${repoName}:`, error);
+        alert(`Errore while cloning repository ${repoName}:`, error)
+        return 'Error cloning repository';
+      }
+    }
+
+    document.getElementById('backBtn').addEventListener('click', () => {
+      const parentPath = currentPath.substring(0, currentPath.lastIndexOf('/'));
+      fetchRepoContents(repoFullName, parentPath);
+    });
+
+    document.getElementById('cloneRepoBtn').addEventListener('click', () => {
+      cloneRepo(repoFullName)
+    });
+  </script>
+</body>
+
+</html>
